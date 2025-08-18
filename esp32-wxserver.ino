@@ -199,9 +199,8 @@ void setup() {
   nrloops = 0;
 
   Serial.begin(57600);
-  do {
-    delay(500);
-  } while ( !Serial );
+  delay(500);
+
 
   Serial.println();
   Serial.println(__FILE__);
