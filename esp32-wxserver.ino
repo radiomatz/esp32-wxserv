@@ -177,10 +177,6 @@ void printLocalTime() {
 void timeavailable(struct timeval *t) {
   if ( Serial ) Serial.println("Got time adjustment from NTP!");
   printLocalTime();
-
-  blink();
-  blink();
-  delay(300);
 }
 
 
@@ -194,12 +190,23 @@ void connect_mqtt() {
 }
 
 
+void blink(int n) {
+  for ( int i = 0; i < n; i++ ) {
+      digitalWrite(LED, true);
+      delay(150);
+      digitalWrite(LED, false);
+      delay(150);
+  }
+  delay(150);
+}
+
+
 
 void setup() {
 
   nrloops = 0;
-  pinMode(LED, OUTPUT);
 
+  pinMode(LED, OUTPUT);
   digitalWrite(LED, true);
 
   Serial.begin(115200);
@@ -209,8 +216,6 @@ void setup() {
     Serial.println();
     Serial.println(__FILE__);
   }
-
-  delay(100);
 
   // WiFi network
   if ( Serial ) Serial.println();
@@ -222,7 +227,7 @@ void setup() {
   WiFi.begin(ssid, password, 0, bssid);
 
   while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
+    delay(100);
     if ( Serial ) Serial.print(".");
   }
 
@@ -251,24 +256,15 @@ void setup() {
   sntp_set_time_sync_notification_cb(timeavailable);
   configTime(gmtOffset_sec, daylightOffset_sec, ntpServer1, ntpServer2);
 
-
   // TCP SERVER
-  server.begin(PORT);    
+  server.begin(PORT);   
   
   digitalWrite(LED, false);
-  delay(300);
 }
-
-void blink() {
-    digitalWrite(LED, true);
-    delay(150);
-    digitalWrite(LED, false);
-    delay(150);
-}
-
 
 
 void loop() {
+
 
   if ( SLEEP_AT_NIGHT && time_ok ) {
     int hhmm = timeinfo.tm_hour * 100 + timeinfo.tm_min;
@@ -277,12 +273,10 @@ void loop() {
       if ( Serial ) Serial.println("Sleeping due to WiFi Shutdown over night");
       delay(3600000); // 1h
     }
-    return;
   } 
 
   if ( !WiFi.isConnected() ) {
     WiFi.reconnect();
-    blink();
     server.begin(PORT);    
   }
 
@@ -297,21 +291,10 @@ void loop() {
 
   // if no client, read BME280
   if (!i_bme280 == 0) {
-
-    // if ( Serial ) Serial.print(F("Temperature in Celsius:\t\t"));
     temp = bme280.readTempF();
     tempc = bme280.readTempC();
-    // if ( Serial ) Serial.println(tempc);
-
-    // if ( Serial ) Serial.print(F("Humidity in %:\t\t\t"));
     humidity = bme280.readHumidity();
-    // if ( Serial ) Serial.println(humidity);
-
-    // if ( Serial ) Serial.print(F("Pressure in hPa:\t\t"));
     pressure = bme280.readPressure() / pow(1.0 - 500.0 / 44330.0, 5.255);
-    // if ( Serial ) Serial.println(pressure);
-
-    //if ( Serial ) Serial.println();
   }
 
   if ( time_ok && !mqttClient.connected() )
@@ -339,12 +322,9 @@ void loop() {
     if ( Serial ) Serial.print("Date: ");
     if ( Serial ) Serial.println(stemp);
 
-    blink();
-    blink();
-    blink();
   }
 
   nrloops = nrloops - 1;
 
-  delay(500);
+  delay(100);
 }
