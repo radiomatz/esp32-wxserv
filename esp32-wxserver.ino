@@ -19,8 +19,6 @@ const char *pos_ew = "01010.10E"; // DDDMM.SSE or DDDMM.SS W ; seconds as decima
 
 #define PORT 1432 // the PortNumber of this host to connect to (tcp)
 
-// end of changeable things
-
 const int LED = 2;
 
 WiFiServer server(PORT);
@@ -29,8 +27,8 @@ BlueDot_BME280 bme280 = BlueDot_BME280();
 int i_bme280 = 1;
 float pressure = 1013;
 float humidity = 50;
-float temp = 69.0; // farenheit
-float tempc = 15.0; // celsius
+float temp = 69.0;   // farenheit
+float tempc = 15.0;  // celsius
 
 struct tm timeinfo;
 bool time_ok = false;
@@ -166,36 +164,38 @@ void setup_bme() {
 
 void printLocalTime() {
   if (!getLocalTime(&timeinfo)) {
-    if ( Serial ) Serial.println("No time available (yet)");
+    if (Serial) Serial.println("No time available (yet)");
     return;
   }
-  time_ok = true;
-  if ( Serial ) Serial.println(&timeinfo, "%A, %B %d %Y %H:%M:%S");
+
+  if (Serial) Serial.println(&timeinfo, "%A, %B %d %Y %H:%M:%S");
 }
 
 // Callback function (gets called when time adjusts via NTP)
 void timeavailable(struct timeval *t) {
-  if ( Serial ) Serial.println("Got time adjustment from NTP!");
+  time_ok = true;
+  if (Serial) Serial.println("Got time adjustment from NTP!");
   printLocalTime();
 }
 
 
 void connect_mqtt() {
-  if ( !mqttClient.connect(broker, port) ) {
-    if ( Serial ) Serial.print("MQTT connection failed! Error code = ");
-    if ( Serial ) Serial.println(mqttClient.connectError());
+  if (Serial) Serial.println("connecting to MQTT");
+  if (!mqttClient.connect(broker, port)) {
+    if (Serial) Serial.print("MQTT connection failed! Error code = ");
+    if (Serial) Serial.println(mqttClient.connectError());
   } else {
-    if ( Serial ) Serial.println("You're connected to the MQTT broker!");
+    if (Serial) Serial.println("You're connected to the MQTT broker!");
   }
 }
 
 
 void blink(int n) {
-  for ( int i = 0; i < n; i++ ) {
-      digitalWrite(LED, true);
-      delay(150);
-      digitalWrite(LED, false);
-      delay(150);
+  for (int i = 0; i < n; i++) {
+    digitalWrite(LED, true);
+    delay(150);
+    digitalWrite(LED, false);
+    delay(150);
   }
   delay(150);
 }
@@ -210,31 +210,31 @@ void setup() {
   digitalWrite(LED, true);
 
   Serial.begin(115200);
-  delay(500);
+  delay(2000);
 
-  if ( Serial ) {
+  if (Serial) {
     Serial.println();
     Serial.println(__FILE__);
   }
 
   // WiFi network
-  if ( Serial ) Serial.println();
-  if ( Serial ) Serial.println();
-  if ( Serial ) Serial.print("Connecting to ");
-  if ( Serial ) Serial.println(ssid);
+  if (Serial) Serial.println();
+  if (Serial) Serial.println();
+  if (Serial) Serial.print("Connecting to ");
+  if (Serial) Serial.println(ssid);
 
   WiFi.mode(WIFI_STA);
   WiFi.begin(ssid, password, 0, bssid);
 
   while (WiFi.status() != WL_CONNECTED) {
     delay(100);
-    if ( Serial ) Serial.print(".");
+    if (Serial) Serial.print(".");
   }
 
-  if ( Serial ) Serial.println("");
-  if ( Serial ) Serial.println("WiFi connected.");
-  if ( Serial ) Serial.print("IP address: ");
-  if ( Serial ) Serial.println(WiFi.localIP());
+  if (Serial) Serial.println("");
+  if (Serial) Serial.println("WiFi connected.");
+  if (Serial) Serial.print("IP address: ");
+  if (Serial) Serial.println(WiFi.localIP());
 
   // BME280
   setup_bme();
@@ -242,89 +242,97 @@ void setup() {
   uint8_t bme_id = bme280.init();
   if (bme_id != 0x60) {
     i_bme280 = 0;
-    if ( Serial ) Serial.print(F("Ops! BME280 could not be found! "));
-    if ( Serial ) Serial.println(bme_id, HEX);
+    if (Serial) Serial.print(F("Ops! BME280 could not be found! "));
+    if (Serial) Serial.println(bme_id, HEX);
   } else {
-    if ( Serial ) Serial.print(F("BME280 detected! "));
-    if ( Serial ) Serial.println(bme_id, HEX);
+    if (Serial) Serial.print(F("BME280 detected! "));
+    if (Serial) Serial.println(bme_id, HEX);
   }
-
-  // MQTT
-  connect_mqtt();
 
   // NTP
   sntp_set_time_sync_notification_cb(timeavailable);
   configTime(gmtOffset_sec, daylightOffset_sec, ntpServer1, ntpServer2);
 
+  while ( !time_ok )
+    delay(100);
+
+  // MQTT
+  connect_mqtt();
+
   // TCP SERVER
-  server.begin(PORT);   
-  
+  server.begin(PORT);
+
   digitalWrite(LED, false);
 }
 
 
 void loop() {
 
+  if ( time_ok ) {
 
-  if ( SLEEP_AT_NIGHT && time_ok ) {
-    int hhmm = timeinfo.tm_hour * 100 + timeinfo.tm_min;
-    if ( SLEEP_AT_NIGHT && ( hhmm >= SLEEP_FROM || hhmm < SLEEP_TO ) ) {
-      if ( Serial ) Serial.println("Time now is: " + String(hhmm));
-      if ( Serial ) Serial.println("Sleeping due to WiFi Shutdown over night");
-      delay(3600000); // 1h
+    if ( SLEEP_AT_NIGHT ) {
+      int hhmm = timeinfo.tm_hour * 100 + timeinfo.tm_min;
+      if (SLEEP_AT_NIGHT && (hhmm >= SLEEP_FROM || hhmm < SLEEP_TO)) {
+        if (Serial) Serial.println("Time now is: " + String(hhmm));
+        if (Serial) Serial.println("Sleeping due to WiFi Shutdown over night");
+        delay(3600000);  // 1h
+      }
+    } 
+
+    if (!WiFi.isConnected()) {
+      if (Serial) Serial.println("reconnecting WiFi");
+      time_ok = false;
+      WiFi.reconnect();
+      server.begin(PORT);
     }
-  } 
 
-  if ( !WiFi.isConnected() ) {
-    WiFi.reconnect();
-    server.begin(PORT);    
+    if ( WiFi.isConnected() ) {
+      WiFiClient client = server.available();  // listen for incoming clients
+      if (client) {
+        if (Serial) Serial.println("got client request from: " + client.remoteIP().toString() + ":" + String(client.remotePort()));
+        if ( client.connected() ) {
+          client.printf("[0] %s-13>WIDE1-1,TCPIP:=%s/%s_c...s...g...t%03.0fh%02.0fb%0.0fxBME ESP32 %.1fC %.1f%% %.1fhPa\n",
+                        callsign, pos_ns, pos_ew, temp, humidity, pressure * 10.0, tempc, humidity, pressure);
+          client.stop();
+        }
+      }
+
+      // if no client, read BME280
+      if (!i_bme280 == 0) {
+        temp = bme280.readTempF();
+        tempc = bme280.readTempC();
+        humidity = bme280.readHumidity();
+        pressure = bme280.readPressure() / pow(1.0 - 500.0 / 44330.0, 5.255);
+      }
+
+      if ( !mqttClient.connected() )
+        connect_mqtt();
+
+      if ( mqttClient.connected() ) {
+        mqttClient.poll();
+        getLocalTime(&timeinfo);
+      }
+
+      if ( mqttClient.connected() && nrloops <= 0) {  // only all 10 mins
+
+        nrloops = 10 * 60 * 2;
+        strftime(stemp, 80, "%F %T", &timeinfo);
+
+        mqttClient.beginMessage(topic, true);
+        mqttClient.printf("%.1f °C - %.0f %% - %.1f hPa", tempc, humidity, pressure);
+        mqttClient.endMessage();
+
+        mqttClient.beginMessage(topicd, true);
+        mqttClient.print(stemp);
+        mqttClient.endMessage();
+
+        if (Serial) Serial.print("MQTT done - ");
+        if (Serial) Serial.print("Date: ");
+        if (Serial) Serial.println(stemp);
+      }
+
+      nrloops = nrloops - 1;
+    }
   }
-
-  WiFiClient client = server.available();  // listen for incoming clients
-  if (client) {
-    if (client.connected()) {
-      client.printf("[0] %s-13>WIDE1-1,TCPIP:=%s/%s_c...s...g...t%03.0fh%02.0fb%0.0fxBME ESP32 %.1fC %.1f%% %.1fhPa\n", 
-        callsign, pos_ns, pos_ew, temp, humidity, pressure * 10.0, tempc, humidity, pressure);
-      client.stop();
-   }
-  }
-
-  // if no client, read BME280
-  if (!i_bme280 == 0) {
-    temp = bme280.readTempF();
-    tempc = bme280.readTempC();
-    humidity = bme280.readHumidity();
-    pressure = bme280.readPressure() / pow(1.0 - 500.0 / 44330.0, 5.255);
-  }
-
-  if ( time_ok && !mqttClient.connected() )
-    connect_mqtt();
-
-  if ( time_ok && mqttClient.connected() ) {  
-    mqttClient.poll();
-    getLocalTime(&timeinfo);
-  }
-
-  if ( time_ok && mqttClient.connected() && nrloops <= 0 ) {  // only all 10 mins
-
-    nrloops = 10 * 60 * 2;
-    strftime(stemp, 80, "%F %T", &timeinfo);
-
-    mqttClient.beginMessage(topic, true);
-    mqttClient.printf("%.1f °C - %.0f %% - %.1f hPa", tempc, humidity, pressure);
-    mqttClient.endMessage();
-    
-    mqttClient.beginMessage(topicd, true);
-    mqttClient.print(stemp);
-    mqttClient.endMessage();
-
-    if ( Serial ) Serial.print("MQTT done - ");
-    if ( Serial ) Serial.print("Date: ");
-    if ( Serial ) Serial.println(stemp);
-
-  }
-
-  nrloops = nrloops - 1;
-
   delay(100);
 }
