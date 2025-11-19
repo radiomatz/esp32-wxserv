@@ -5,19 +5,20 @@
 #include "time.h"
 #include "esp_sntp.h"
 
+// start your config here:
+
 const char *ssid = "MYBOX XXXX YYYYY";                           // The NAME of your wifi router
 const char *password = "PPPPPPPPPPPPPPPPPPPP";                   // Password of your wifi router
 const uint8_t bssid[6] = { 0xfe, 0xfd, 0xfc, 0xfb, 0xfb, 0xfa }; // The Mac Address of your wifi router
-
-#define SLEEP_AT_NIGHT true // are you also one of them switching WiFi off over night at your router ?
-#define SLEEP_FROM 2300     // hhmm
-#define SLEEP_TO    659     // hhmm or hmm 
 
 const char *callsign = "N0CALL";// your callsign without suffix (see suffixes @ aprs-doku)
 const char *pos_ns = "4848.48N"; // DDMM.SSN or DDMM.SSS ; seconds as decimal fraction of minute
 const char *pos_ew = "01010.10E"; // DDDMM.SSE or DDDMM.SS W ; seconds as decimal fraction of minute
 
-#define PORT 1432 // the PortNumber of this host to connect to (tcp)
+#define PORT 1432 // the PortNumber of this host to connect to (tcp) 
+
+// end of changeable things
+
 
 const int LED = 2;
 
@@ -27,6 +28,7 @@ BlueDot_BME280 bme280 = BlueDot_BME280();
 int i_bme280 = 1;
 float pressure = 1013;
 float humidity = 50;
+float humidityraw = 50;
 float temp = 69.0;   // farenheit
 float tempc = 15.0;  // celsius
 
@@ -40,10 +42,10 @@ const int daylightOffset_sec = 0;
 WiFiClient wifiClient;
 MqttClient mqttClient(wifiClient);
 const char broker[] = "192.168.178.20";
-int port = 1883;
+const int port = 1883;
 const char topic[] = "weather/sensor";
 const char topicd[] = "weather/date";
-volatile long nrloops;
+volatile long nrloops = 0;
 char stemp[128];
 
 
@@ -167,7 +169,6 @@ void printLocalTime() {
     if (Serial) Serial.println("No time available (yet)");
     return;
   }
-
   if (Serial) Serial.println(&timeinfo, "%A, %B %d %Y %H:%M:%S");
 }
 
@@ -253,7 +254,7 @@ void setup() {
   sntp_set_time_sync_notification_cb(timeavailable);
   configTime(gmtOffset_sec, daylightOffset_sec, ntpServer1, ntpServer2);
 
-  while ( !time_ok )
+  while (!time_ok)
     delay(100);
 
   // MQTT
@@ -268,58 +269,55 @@ void setup() {
 
 void loop() {
 
-  if ( time_ok ) {
+  while ( WiFi.status() != WL_CONNECTED ) {
+    if (Serial) Serial.println("reconnecting WiFi");
+    // server.end();
+    WiFi.reconnect();
+    if (Serial) Serial.println("sleep after reconnecting WiFi");
+    delay(30000);
+    // server.begin(PORT);
+    nrloops = 0;
+  }
+  getLocalTime(&timeinfo);
 
-    if ( SLEEP_AT_NIGHT ) {
-      int hhmm = timeinfo.tm_hour * 100 + timeinfo.tm_min;
-      if (SLEEP_AT_NIGHT && (hhmm >= SLEEP_FROM || hhmm < SLEEP_TO)) {
-        if (Serial) Serial.println("Time now is: " + String(hhmm));
-        if (Serial) Serial.println("Sleeping due to WiFi Shutdown over night");
-        delay(3600000);  // 1h
+  if ( WiFi.isConnected() ) {
+    WiFiClient client = server.available();  // listen for incoming clients
+    if (client) {
+      if (Serial) Serial.println("got client request from: " + client.remoteIP().toString() + ":" + String(client.remotePort()));
+      if (client.connected()) {
+        client.printf("[0] %s-13>WIDE1-1,TCPIP:=%s/%s_c...s...g...t%03.0fh%02.0fb%0.0fxBME ESP32 %.1fC %.1f%%(%.1f) %.1fhPa\n",
+                      callsign, pos_ns, pos_ew, temp, humidity, pressure * 10.0, tempc, humidity, humidityraw, pressure);
+        client.stop();
       }
-    } 
-
-    if (!WiFi.isConnected()) {
-      if (Serial) Serial.println("reconnecting WiFi");
-      time_ok = false;
-      WiFi.reconnect();
-      server.begin(PORT);
     }
+  }
 
-    if ( WiFi.isConnected() ) {
-      WiFiClient client = server.available();  // listen for incoming clients
-      if (client) {
-        if (Serial) Serial.println("got client request from: " + client.remoteIP().toString() + ":" + String(client.remotePort()));
-        if ( client.connected() ) {
-          client.printf("[0] %s-13>WIDE1-1,TCPIP:=%s/%s_c...s...g...t%03.0fh%02.0fb%0.0fxBME ESP32 %.1fC %.1f%% %.1fhPa\n",
-                        callsign, pos_ns, pos_ew, temp, humidity, pressure * 10.0, tempc, humidity, pressure);
-          client.stop();
-        }
-      }
+  // if no client, read BME280
+  if (!i_bme280 == 0) {
+    temp = bme280.readTempF();
+    tempc = bme280.readTempC();
+    humidity = bme280.readHumidity();
+    humidityraw = bme280.readHumidityRaw() / 1000.0;
+    pressure = bme280.readPressure() / pow(1.0 - 500.0 / 44330.0, 5.255);
+  }
 
-      // if no client, read BME280
-      if (!i_bme280 == 0) {
-        temp = bme280.readTempF();
-        tempc = bme280.readTempC();
-        humidity = bme280.readHumidity();
-        pressure = bme280.readPressure() / pow(1.0 - 500.0 / 44330.0, 5.255);
-      }
+  if (!mqttClient.connected())
+    connect_mqtt();
 
-      if ( !mqttClient.connected() )
-        connect_mqtt();
+  if (mqttClient.connected()) {
+    mqttClient.poll();
+    getLocalTime(&timeinfo);
+  }
 
-      if ( mqttClient.connected() ) {
-        mqttClient.poll();
-        getLocalTime(&timeinfo);
-      }
-
-      if ( mqttClient.connected() && nrloops <= 0) {  // only all 10 mins
-
-        nrloops = 10 * 60 * 2;
+  if (time_ok) {
+    if (mqttClient.connected()) {
+      if (nrloops <= 0) {  // only all 10 mins
+//        nrloops = 10 * 60 * 2;
+        nrloops = 100 /* secs */ * 4;
         strftime(stemp, 80, "%F %T", &timeinfo);
 
         mqttClient.beginMessage(topic, true);
-        mqttClient.printf("%.1f °C - %.0f %% - %.1f hPa", tempc, humidity, pressure);
+        mqttClient.printf("%.1f °C - %.0f %%(%.1f) - %.1f hPa", tempc, humidity, humidityraw, pressure);
         mqttClient.endMessage();
 
         mqttClient.beginMessage(topicd, true);
@@ -329,10 +327,11 @@ void loop() {
         if (Serial) Serial.print("MQTT done - ");
         if (Serial) Serial.print("Date: ");
         if (Serial) Serial.println(stemp);
+        temp = tempc =  humidity =  humidityraw =  pressure = 0;
       }
-
-      nrloops = nrloops - 1;
     }
+    nrloops = nrloops - 1;
   }
-  delay(100);
+
+  delay(250);
 }
